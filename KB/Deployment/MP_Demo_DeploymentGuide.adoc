@@ -10,7 +10,7 @@ This guide provides step-by-step instructions for deploying the Evolveum midPoin
 
 https://github.com/Evolveum/midpoint-kubernetes.git
 
-NOTE: If you prefer to automate the entire process, you can run it via a prepared Bash script instead of executing the steps manually. The full script this guide is based on can be found in your automation repository or adapted from this documentation.
+NOTE: If you prefer to automate the entire process, you can run it via a https://github.com/jlukanic/Evolveum/blob/main/KB/Deployment/mp_demo-install-linux.sh[prepared Bash script] instead of executing the steps manually.
 
 == Prerequisites
 
