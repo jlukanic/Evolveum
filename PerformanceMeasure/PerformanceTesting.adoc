@@ -1,0 +1,133 @@
+= MidPoint Performance Benchmarking Plan
+
+== 1 🎯 Objectives & Scope
+
+[cols="1,3,2",options="header"]
+|===
+|Level | Goal | In / Out of Scope
+|Primary | Quantify runtime and throughput of *Import → Live Sync → Reconciliation* under controlled load. | In: Core operations on single-node midPoint
+|Secondary | Identify resource bottlenecks (CPU, RAM, DB-I/O) to support capacity planning. | Out: UI performance, approvals, HA setups
+|===
+
+== 2 🧪 Test Variables vs Constants
+
+[cols="1,2,2",options="header"]
+|===
+|Category | Independent Variables (change) | Constants (freeze)
+|Resource Count | 5, 10, 20, 30, 50 | VM hardware spec (CPU/RAM/Disk)
+|Assignments per User | 1, 5, 10 | midPoint version, PostgreSQL, OpenJDK
+|Mapping Complexity | Simple (1-to-1) ↔ Complex (Groovy, conditions) | 1000-user HR dataset (CSV)
+|User Delta Size | 1%, 10%, 100% for Live Sync | Fixed HR schema
+|Connector Latency (optional) | 0ms, 100ms emulated (tc/netem) | Host-only local network
+|===
+
+== 3 📈 KPIs & Instrumentation
+
+[cols="1,2,2",options="header"]
+|===
+|KPI | Tool / Method | Notes
+|Task Duration | Audit logs, task view | Record start/end timestamps
+|Throughput (ops/sec) | Derived from duration | Total records / duration
+|CPU Load % | `vmstat`, `sar`, Prometheus | Track midPoint + DB
+|Heap Usage | JMX, VisualVM, Prometheus exporter | Peak usage post-GC
+|DB TPS / Queries | `pg_stat_statements` | Measure slow queries
+|Connector Latency | midPoint perf counters | Optional, if available
+|===
+
+== 4 📐 Test Matrix Template
+
+[cols="^1,^1,^1,^1,^2,^2,^2,^1,^1",options="header"]
+|===
+|ID | # Resources | Assign/User | Mapping | Import (s) | Sync (s) | Recon (s) | CPU % | Heap GB
+|BASE-01 | 1 | 1 | Simple | - | - | - | - | -
+|T-05-1 | 5 | 1 | Simple | | | | |
+|T-10-5 | 10 | 5 | Simple | | | | |
+|T-20-5C | 20 | 5 | Complex | | | | |
+|T-30-10 | 30 | 10 | Simple | | | | |
+|T-50-10C | 50 | 10 | Complex | | | | |
+|===
+
+Repeat each test 3 times for average and standard deviation.
+
+== 5 🛠️ Execution Playbook
+
+=== 5.1 Infrastructure (Hyper-V preferred)
+
+[cols="1,1,1,1,3",options="header"]
+|===
+|VM | vCPU | RAM | Disk | Role
+|midPoint | 8 | 16 GB | 100 GB SSD | midPoint + exporters
+|PostgreSQL | 4 | 8 GB | 100 GB SSD | External DB + metrics
+|Mock Resources | light | 2 GB | 20 GB | Dockerized LDAP/SCIM
+|===
+
+Use snapshots to easily reset state between tests.
+
+=== 5.2 Data & Config Automation
+
+* Generate 1000 users via `gen_users.py` (CSV output)
+* Resource factory script: clones template OpenLDAP/SCIM 50x with unique ports
+* Role templates with inducements — use env var to control assignment count
+* Load configuration using midPoint REST:
+
+## [source,bash]
+
+## mpcli import all --dir ./config-set-\${TEST\_ID}
+
+=== 5.3 Test Run Protocol
+
+. Reset environment:
+[source,bash]
+--------------
+
+systemctl stop midpoint
+dropdb midpoint
+createdb midpoint -O midpoint
+systemctl start midpoint
+mpcli import base-schema.xml
+----------------------------
+
+. Start telemetry:
+[source,bash]
+--------------
+
+## vmstat 1 > vmstat\_\${ID}.log &
+
+. Launch operation (Import / Sync / Reconciliation)
+. Monitor and record task duration
+. Save metrics: Grafana snapshots, audit logs, CPU logs
+. Repeat 3x per test case
+
+== 6 📊 Post-Processing & Reporting
+
+* Use Pandas / Excel / BI Tool to aggregate:
+  \*\* Average duration
+  \*\* Standard deviation
+  \*\* Peak usage stats
+
+* Visualizations:
+  \*\* Line graph: Resources vs Duration
+  \*\* Bar chart: Peak Heap Usage
+  \*\* Heatmap: CPU by Test ID
+
+* Analysis Questions:
+  \*\* When does performance become non-linear?
+  \*\* Is heap pressure reaching GC thresholds?
+  \*\* Is PostgreSQL maxing out before midPoint?
+
+== 7 ♻️ Scaling & Follow-up Tests
+
+* Increase dataset to 10k / 100k users
+* HA benchmark: repeat matrix in 2-node clustered midPoint
+* Use live connectors (e.g., Azure AD, Okta) for latency realism
+* Schedule test automation via GitHub Actions on Hyper-V host
+
+== 8 Optional Assets (on request)
+
+* Shell/PowerShell setup scripts for VM bootstrap
+* Docker Compose file for 50 mock SCIM endpoints
+* `gen_users.py` and CSV format examples
+* Grafana starter dashboard JSON
+* REST benchmarking JMeter plan
+
+Let me know which parts you'd like generated first.
