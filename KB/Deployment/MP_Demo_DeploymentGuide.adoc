@@ -1,4 +1,4 @@
-= Step-by-Step Guide to Deploy Evolveum midPoint Live Demo Using K3s and Argo CD
+= Step-by-Step Guide to Deploy Evolveum midPoint Live Demo Using K3s (kubectl create -k) and Argo CD (optional)
 :author:
 :revdate: 2025-06-28
 :toc:
@@ -6,277 +6,227 @@
 :source-highlighter: highlight.js
 :sectnums:
 
-This guide provides step-by-step instructions for deploying the Evolveum midPoint Live Demo using K3s, Argo CD, and a GitOps approach. It adapts to multiple Linux distributions and is based on the `devel` branch of the official repository:
+This guide provides step-by-step instructions for deploying the Evolveum midPoint Live Demo using K3s with a GitOps-ready structure. The primary method described uses kubectl create -k for direct deployment. Argo CD is included as an optional alternative for users who prefer declarative continuous delivery and synchronization.
 
-https://github.com/Evolveum/midpoint-kubernetes.git
+Repository used:
+https://github.com/Evolveum/midpoint-kubernetes.git (branch: devel)
 
-NOTE: If you prefer to automate the entire process, you can run it via a https://github.com/jlukanic/Evolveum/blob/main/KB/Deployment/mp_demo-install-linux.sh[prepared Bash script] instead of executing the steps manually. Please ensure that all variables are adjusted to your current environment before the script is deployed.
+NOTE: To automate the process, use the provided script:
+https://github.com/jlukanic/Evolveum/blob/main/KB/Deployment/mp_demo-install-linux.sh
+Ensure all variables match your environment before execution.
 
 == Prerequisites
 
-* A clean Linux VM or server (Ubuntu, Debian, Fedora, CentOS, or RHEL)
-* Internet access to fetch packages and container images
-* Sudo privileges on the system
-* GitHub account (if forking and customizing the repository)
+Clean Linux VM (Ubuntu/Debian/Fedora/CentOS/RHEL)
+
+Internet access
+
+Sudo privileges
+
+GitHub account (optional but recommended for GitOps)
 
 == Step 1: Detect Your Linux OS and Use the Appropriate Package Manager
-
-Identify the operating system to determine the appropriate package manager:
 
 [cols="1,1,1"]
 |===
 | OS | Package Manager | Install Command
 
 | Ubuntu / Debian
-| `apt`
-| `sudo apt-get update && sudo apt-get install -y curl git openssh-server`
+| apt
+| sudo apt-get update && sudo apt-get install -y curl git openssh-server
 
 | Fedora
-| `dnf`
-| `sudo dnf update -y && sudo dnf install -y curl git openssh-server`
+| dnf
+| sudo dnf update -y && sudo dnf install -y curl git openssh-server
 
 | CentOS / RHEL
-| `yum`
-| `sudo yum update -y && sudo yum install -y curl git openssh-server`
+| yum
+| sudo yum update -y && sudo yum install -y curl git openssh-server
 |===
 
-== Step 2: Install K3s (Lightweight Kubernetes)
-
-Install K3s using the official install script:
+== Step 2: Install K3s
 
 [source,bash]
-----
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode=644" sh -
-----
+K3s: https://k3s.io
 
-Official K3s website: https://k3s.io
-
-== Step 3: Configure Your kubeconfig
-
-Set up kubeconfig so that `kubectl` works for your user:
+== Step 3: Configure kubectl
 
 [source,bash]
-----
 mkdir -p ~/.kube
 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
 sudo chown $(id -u):$(id -g) ~/.kube/config
-----
-
-== Step 4: Install Argo CD
-
-Create a namespace and install Argo CD into your cluster:
+== Step 4: Clone the midPoint Kubernetes Repository
 
 [source,bash]
-----
+git clone --branch devel https://github.com/Evolveum/midpoint-kubernetes.git /opt/midpoint-kubernetes
+cd /opt/midpoint-kubernetes
+== Step 5: Edit Configuration Files
+
+Edit deployment-specific values in options-map.yaml:
+
+[source,bash]
+sed -i "s|ingress_host: .|ingress_host: demo.example.com|g" midpoint-live-demo/kustomize-base/kustomize-env-config/options-map.yaml
+sed -i "s|cluster_domain: .|cluster_domain: cluster.local|g" midpoint-live-demo/kustomize-base/kustomize-env-config/options-map.yaml
+sed -i "s|ingress_class_name: .*|ingress_class_name: traefik|g" midpoint-live-demo/kustomize-base/kustomize-env-config/options-map.yaml
+Update demo.example.com to your preferred domain.
+
+== Step 6: Deploy midPoint Using kubectl create -k (Primary Method)
+
+[source,bash]
+kubectl create namespace mp-demo
+kubectl create -k midpoint-live-demo/kustomize-base/ -n mp-demo
+Wait for all pods to start:
+
+[source,bash]
+kubectl get pods -n mp-demo -w
+== Step 7: (Optional) Use Argo CD Instead
+
+If you prefer to use Argo CD for GitOps-based deployment:
+
+=== 7.1 Install Argo CD
+
+[source,bash]
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=300s
-----
-
-Official Argo CD documentation: https://argo-cd.readthedocs.io
-
-== Step 5: Clone the midPoint Kubernetes Demo Repository
-
-Clone the Evolveum `midpoint-kubernetes` demo from GitHub:
+=== 7.2 Push Your Changes (if using your own Git repo)
 
 [source,bash]
-----
-git clone --branch devel https://github.com/Evolveum/midpoint-kubernetes.git /opt/midpoint-kubernetes
-cd /opt/midpoint-kubernetes
-----
-
-== Step 6: Update Configuration Values
-
-Update key values in `options-map.yaml`:
-
-[source,bash]
-----
-sed -i "s|ingress_host: .*|ingress_host: demo.example.com|g" midpoint-live-demo/kustomize-base/kustomize-env-config/options-map.yaml
-sed -i "s|cluster_domain: .*|cluster_domain: cluster.local|g" midpoint-live-demo/kustomize-base/kustomize-env-config/options-map.yaml
-sed -i "s|ingress_class_name: .*|ingress_class_name: traefik|g" midpoint-live-demo/kustomize-base/kustomize-env-config/options-map.yaml
-----
-
-NOTE: Adjust `demo.example.com` to your desired hostname.
-
-== Step 7: Optionally Push Changes to Your Git Repository
-
-If you're customizing or using GitOps workflows, initialize or update your Git repository:
-
-[source,bash]
-----
 cd /opt/midpoint-kubernetes
 git init
 git config user.email "autobot@midpoint.local"
 git config user.name "MidPoint Argo Installer"
 git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
 git add midpoint-live-demo/kustomize-base/kustomize-env-config/options-map.yaml
-git commit -m "Initialize midPoint deployment with updated options"
+git commit -m "Initialize midPoint deployment"
 git branch -M devel
 git push -f origin devel
-----
-
-== Step 8: Deploy the Argo CD Application
-
-Apply the Argo CD `Application` manifest to deploy midPoint:
+=== 7.3 Deploy with Argo CD
 
 [source,yaml]
-----
 kubectl apply -n argocd -f - <<EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: midpoint
-  namespace: argocd
+name: midpoint
+namespace: argocd
 spec:
-  project: default
-  source:
-    repoURL: https://github.com/Evolveum/midpoint-kubernetes.git
-    targetRevision: devel
-    path: midpoint-live-demo/kustomize-base
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: mp-demo
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-    - CreateNamespace=true
+project: default
+source:
+repoURL: https://github.com/Evolveum/midpoint-kubernetes.git
+targetRevision: devel
+path: midpoint-live-demo/kustomize-base
+destination:
+server: https://kubernetes.default.svc
+namespace: mp-demo
+syncPolicy:
+automated:
+prune: true
+selfHeal: true
+syncOptions:
+- CreateNamespace=true
 EOF
-----
-
-== Step 9: Access the Argo CD UI
-
-Forward the Argo CD service to localhost:
+=== 7.4 Access Argo CD UI
 
 [source,bash]
-----
 kubectl port-forward svc/argocd-server -n argocd 8080:443
-----
+Login:
 
-Login with:
+Username: admin
 
-* **Username:** `admin`
-* **Password:** 
+Password:
 [source,bash]
-----
+
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-----
+Browse to: https://localhost:8080
 
-== Step 10: Access midPoint
+== Step 8: Access midPoint
 
-Once deployed and the Ingress is ready, access midPoint at:
+After Ingress is ready:
 
 https://demo.example.com
 
-Login with:
+Credentials:
 
-* **Username:** `administrator`
-* **Password:** `IGA4ever`
+Username: administrator
 
-If DNS resolution fails, add to your `/etc/hosts`:
+Password: IGA4ever
 
+If DNS fails, add this to /etc/hosts:
+
+Copy
+Edit
 127.0.0.1 demo.example.com
-
 == Troubleshooting Tips
 
 === midPoint or Argo CD Pod Is Not Starting
 
-Check the status of all pods:
+Check pod status:
 
 [source,bash]
-----
 kubectl get pods -A
-----
-
-To see more detail for a failing pod:
-
-[source,bash]
-----
 kubectl describe pod <pod-name> -n <namespace>
-----
-
-Check container logs:
+kubectl logs <pod-name> -n <namespace>
+kubectl logs <pod-name> -c <container-name> -n <namespace>
+Temporarily disable firewalld (if needed):
 
 [source,bash]
-----
-kubectl logs <pod-name> -n <namespace>
-# For multiple containers in a pod:
-kubectl logs <pod-name> -c <container-name> -n <namespace>
-----
-
-If deployment appears synced and healthy but midPoint demo is still showing "Bad Gateway", try adjusting the firewall settings:
-----
 sudo systemctl status firewalld
 sudo systemctl stop firewalld
 sudo systemctl disable firewalld
-----
+=== Argo CD Application Sync/Health Errors
 
-=== Argo CD Application Shows Sync or Health Errors
+View errors in Argo CD UI
 
-1. Check Argo CD UI for error messages.
-2. Use `kubectl get events -n mp-demo` to look for resource creation or scheduling problems.
-3. If the Argo Application is stuck or broken, delete and recreate it:
+Inspect events:
 
 [source,bash]
-----
-kubectl delete application midpoint -n argocd
-# Then re-apply the application manifest
-----
+kubectl get events -n mp-demo
+Recreate application:
 
+[source,bash]
+kubectl delete application midpoint -n argocd
+
+Recreate the manifest as needed
 === Ingress Not Working
 
-1. Confirm your Ingress controller is installed (e.g., `traefik` in K3s):
+Check if traefik is running (K3s default):
 
 [source,bash]
-----
 kubectl get pods -A | grep traefik
-----
-
-2. Ensure your `ingress_host` matches your `/etc/hosts` entry if you're testing locally.
-
-3. Use `kubectl describe ingress` in your namespace to confirm it was created and has a backend.
-
-=== Database Pod Issues
-
-If PostgreSQL or midPoint fails to connect to the DB:
+Confirm Ingress object exists:
 
 [source,bash]
-----
-kubectl logs <midpoint-pod-name> -n mp-demo
-kubectl logs <postgresql-pod-name> -n mp-demo
-----
+kubectl describe ingress -n mp-demo
+Ensure domain resolution works (/etc/hosts)
 
+=== PostgreSQL or midPoint Fails to Start
+
+[source,bash]
+kubectl logs <midpoint-pod> -n mp-demo
+kubectl logs <postgresql-pod> -n mp-demo
 Check for:
 
-* Wrong DB credentials or empty passwords
-* PersistentVolumeClaim issues (look for `Pending` or `Failed`)
-* Init container failures (`kubectl describe pod` will show these)
+Empty/incorrect DB credentials
 
-=== General Argo CD Debugging
+Failed PersistentVolumeClaims
 
-Use the Argo CD CLI (`argocd`) for deeper inspection:
+Init container failures
+
+=== Debug Argo CD via CLI
 
 [source,bash]
-----
-# Install CLI: https://argo-cd.readthedocs.io/en/stable/cli_installation/
+Optional CLI tool
 argocd app list
 argocd app get midpoint
-----
-
-You can port-forward the API server and log in:
-
-[source,bash]
-----
-kubectl port-forward svc/argocd-server -n argocd 8080:443
-----
-
-Then visit `http://localhost:8080` in your browser.
-                                
 == Useful Links
 
-* Evolveum midPoint Kubernetes repository: https://github.com/Evolveum/midpoint-kubernetes
-* Evolveum midPoint Documentation: https://docs.evolveum.com/
-* Argo CD documentation: https://argo-cd.readthedocs.io
-* K3s documentation: https://docs.k3s.io
+midPoint Kubernetes repo: https://github.com/Evolveum/midpoint-kubernetes
+
+midPoint Docs: https://docs.evolveum.com
+
+Argo CD Docs: https://argo-cd.readthedocs.io
+
+K3s Docs: https://docs.k3s.io
 
