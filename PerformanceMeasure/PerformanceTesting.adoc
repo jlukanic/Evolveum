@@ -51,69 +51,180 @@ Repeat each test 3 times for average and standard deviation.
 
 == 5 Execution Playbook
 
-=== 5.1 Infrastructure (Hyper-V preferred)
+This section assumes midPoint is already installed and operational. The focus is strictly on performance benchmarking activities.
 
-[cols="1,1,1,1,3",options="header"]
-|===
-|VM | vCPU | RAM | Disk | Role
-|midPoint | 8 | 16 GB | 100 GB SSD | midPoint + exporters
-|PostgreSQL | 4 | 8 GB | 100 GB SSD | External DB + metrics
-|Mock Resources | light | 2 GB | 20 GB | Dockerized LDAP/SCIM
-|===
+=== 5.1 Test Data Generation
 
-Use snapshots to easily reset state between tests.
+==== Generate Realistic Users
 
-=== 5.2 Data & Config Automation
+Install the Faker library:
 
-* Generate 1000 users via `gen_users.py` (CSV output)
-* Resource factory script: clones template OpenLDAP/SCIM 50x with unique ports
-* Role templates with inducements — use env var to control assignment count
-* Load configuration using midPoint REST:
-
-## [source,bash]
-
-## mpcli import all --dir ./config-set-\${TEST\_ID}
-
-=== 5.3 Test Run Protocol
-
-. Reset environment:
 [source,bash]
---------------
+----
+pip3 install faker
+----
 
-systemctl stop midpoint
-dropdb midpoint
-createdb midpoint -O midpoint
-systemctl start midpoint
-mpcli import base-schema.xml
-----------------------------
+Save the following as `gen_users_realistic.py`:
 
-. Start telemetry:
+[source,python]
+----
+from faker import Faker
+import csv
+
+fake = Faker()
+Faker.seed(0)
+
+users = []
+for i in range(1, 1001):
+first = fake.first_name()
+last = fake.last_name()
+email = f"{first.lower()}.{last.lower()}{i}@example.com"
+users.append({
+'employeeId': f'E{i:04d}',
+'firstName': first,
+'lastName': last,
+'email': email,
+'status': 'active'
+})
+
+with open('users.csv', 'w', newline='') as f:
+writer = csv.DictWriter(f, fieldnames=users[0].keys())
+writer.writeheader()
+writer.writerows(users)
+----
+
+Run it:
+
 [source,bash]
---------------
+----
+python3 gen_users_realistic.py
+----
 
-## vmstat 1 > vmstat\_\${ID}.log &
+==== Optional: Expand to 10k+ Users
 
-. Launch operation (Import / Sync / Reconciliation)
-. Monitor and record task duration
-. Save metrics: Grafana snapshots, audit logs, CPU logs
-. Repeat 3x per test case
+To scale up:
 
-== 6 Post-Processing & Reporting
+[source,python]
+----
+for i in range(1, 10001):  # 10,000 users
+...
+----
 
-* Use Pandas / Excel / BI Tool to aggregate:
-  \*\* Average duration
-  \*\* Standard deviation
-  \*\* Peak usage stats
+=== 5.2 Resource & Role Preparation
+
+==== Create Roles & Assignments
+
+Design a template role with inducements:
+
+[source,xml]
+----
+<role>
+  <name>App-X-User</name>
+  <inducement>
+    <construction>
+      <resourceRef oid="..." type="ResourceType"/>
+    </construction>
+  </inducement>
+</role>
+----
+
+Repeat or vary based on test matrix (e.g. 5 roles assigned per user).
+
+==== Automate Resource Creation
+
+Create `generate_resources.sh`:
+
+[source,bash]
+----
+#!/bin/bash
+for i in $(seq 1 10); do
+cp resource-template.xml resource-${i}.xml
+sed -i "s/**RESOURCE_ID**/resource-${i}/g" resource-${i}.xml
+sed -i "s/**PORT**/$((8080 + $i))/g" resource-${i}.xml
+mpcli import resource-${i}.xml
+done
+----
+
+Make it executable:
+
+[source,bash]
+----
+chmod +x generate_resources.sh
+./generate_resources.sh
+----
+
+=== 5.3 Import Users into midPoint
+
+Transform `users.csv` to XML using custom script or upload via GUI:
+
+. Import using UI:
+
+* Resources → HR CSV → Import
+  . Or use REST:
+
+[source,bash]
+----
+curl -u administrator:5ecr3t 
+-H "Content-Type: text/csv" 
+--data-binary @users.csv 
+[http://localhost:8080/midpoint/ws/rest/users/import](http://localhost:8080/midpoint/ws/rest/users/import)
+----
+
+=== 5.4 Monitoring Setup
+
+Install tools:
+
+[source,bash]
+----
+sudo apt install -y htop iotop sysstat
+----
+
+Start resource tracking:
+
+[source,bash]
+----
+vmstat 1 > vmstat_test01.log &
+----
+
+=== 5.5 Run Benchmarks
+
+For each test case (row in matrix):
+
+. Reset users/assignments/resources if needed
+. Import users
+. Assign roles
+. Trigger task (Import / Live Sync / Reconciliation)
+. Monitor task via GUI or REST
+. Record:
+
+* Start timestamp
+* End timestamp
+* CPU usage (from `vmstat`)
+* Heap usage (from JMX/VisualVM)
+  . Save audit logs:
+
+[source,bash]
+----
+cp /opt/midpoint/var/log/audit.log results/audit_${ID}.log
+cp vmstat_test01.log results/vmstat_${ID}.log
+----
+
+Repeat each test 3 times.
+
+* Use Pandas / Excel to aggregate:
+  ** Average duration
+  ** Standard deviation
+  ** Peak usage stats
 
 * Visualizations:
-  \*\* Line graph: Resources vs Duration
-  \*\* Bar chart: Peak Heap Usage
-  \*\* Heatmap: CPU by Test ID
+  ** Line graph: Resources vs Duration
+  ** Bar chart: Peak Heap Usage
+  ** Heatmap: CPU by Test ID
 
 * Analysis Questions:
-  \*\* When does performance become non-linear?
-  \*\* Is heap pressure reaching GC thresholds?
-  \*\* Is PostgreSQL maxing out before midPoint?
+  ** When does performance become non-linear?
+  ** Is heap pressure reaching GC thresholds?
+  ** Is PostgreSQL maxing out before midPoint?
 
 == 7 Scaling & Follow-up Tests
 
@@ -129,5 +240,6 @@ mpcli import base-schema.xml
 * `gen_users.py` and CSV format examples
 * Grafana starter dashboard JSON
 * REST benchmarking JMeter plan
-
-Let me know which parts you'd like generated first.
+* Export data to Excel for graphs
+* Build Prometheus + Grafana dashboards
+* Optionally upload results to GitHub Wiki or Confluence
